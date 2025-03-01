@@ -1,158 +1,80 @@
-// server/controllers/returns.js
-const Return = require('../models/Return');
+// server/controllers/products.js
 const { getClient } = require('../services/shopify');
 
-exports.createReturn = async (req, res) => {
+exports.getAlternatives = async (req, res) => {
   try {
-    const { orderId, lineItemId, returnOption, reason } = req.body;
+    const { for: productId } = req.query;
     
-    if (!orderId || !lineItemId || !returnOption || !reason) {
-      return res.status(400).json({ 
-        error: 'Missing required fields',
-        details: 'orderId, lineItemId, returnOption, and reason are required' 
-      });
+    if (!productId) {
+      return res.status(400).json({ error: 'Missing productId parameter' });
     }
-    
-    // Create return record in database
-    const returnRecord = new Return({
-      orderId,
-      lineItemId,
-      returnOption,
-      reason,
-      status: 'pending'
-    });
-    
-    await returnRecord.save();
-    
-    // If this is an exchange, additional logic would go here
-    if (returnOption === 'exchange') {
-      // Process exchange with Shopify
-      // This would handle variant selection, etc.
-    }
-    
-    return res.status(201).json({
-      success: true,
-      returnId: returnRecord._id,
-      message: 'Return created successfully'
-    });
-  } catch (error) {
-    console.error('Error creating return:', error);
-    return res.status(500).json({ 
-      error: 'Failed to create return',
-      details: error.message
-    });
-  }
-};
 
-exports.batchProcess = async (req, res) => {
-  try {
-    const { items } = req.body;
-    
-    if (!Array.isArray(items) || items.length === 0) {
-      return res.status(400).json({
-        error: 'Invalid request',
-        details: 'Expected an array of items'
-      });
-    }
-    
-    const results = [];
-    const processedIds = new Set();
-    
-    for (const item of items) {
-      // Skip duplicates
-      if (processedIds.has(item.lineItemId)) continue;
-      processedIds.add(item.lineItemId);
+    // Get original product to find similar products
+    const client = getClient();
+    const { body: productResponse } = await client.get({
+      path: `products/${productId}`,
+    });
+
+    // If the product exists, find similar products based on tags or other criteria
+    if (productResponse?.product) {
+      const product = productResponse.product;
       
-      try {
-        // Process based on return option
-        if (item.returnOption === 'exchange') {
-          // Handle exchange logic
-          // This would interact with Shopify API to process exchanges
-          results.push({
-            lineItemId: item.lineItemId,
-            type: 'exchange',
-            success: true
-          });
-        } else {
-          // Handle standard return
-          // This would interact with Shopify API to process returns
-          results.push({
-            lineItemId: item.lineItemId,
-            type: 'return',
-            success: true
-          });
-        }
-      } catch (itemError) {
-        console.error(`Error processing item ${item.lineItemId}:`, itemError);
-        results.push({
-          lineItemId: item.lineItemId,
-          type: item.returnOption,
-          success: false,
-          error: itemError.message
-        });
+      // Use product tags to find similar products
+      let query = '';
+      if (product.tags) {
+        // Find products with similar tags
+        query = `status:active AND (${product.tags.split(',').map(tag => `tag:${tag.trim()}`).join(' OR ')})`;
+      } else {
+        // Fallback to product type
+        query = `status:active AND product_type:${product.product_type}`;
       }
-    }
-    
-    // Check if any operations failed
-    const hasFailures = results.some(result => !result.success);
-    
-    if (hasFailures) {
-      return res.status(207).json({
-        partialSuccess: true,
-        results
+      
+      const { body: searchResponse } = await client.get({
+        path: 'products',
+        query: {
+          limit: 5,
+          fields: 'id,title,variants,images',
+          product_type: product.product_type
+        }
       });
+      
+      // Filter out the original product and format the response
+      const alternatives = searchResponse.products
+        .filter(p => p.id !== product.id)
+        .map(p => ({
+          id: p.id,
+          title: p.title,
+          price: p.variants[0]?.price || '0.00',
+          image: p.images[0] || null
+        }));
+      
+      return res.json(alternatives);
     }
     
-    return res.status(200).json({
-      success: true,
-      results
-    });
+    // If no product found, return empty array
+    return res.json([]);
   } catch (error) {
-    console.error('Error processing batch:', error);
-    return res.status(500).json({
-      error: 'Error processing batch',
-      details: error.message
-    });
+    console.error('Error fetching alternatives:', error);
+    res.status(500).json({ error: 'Failed to fetch alternatives from Shopify' });
   }
 };
 
-exports.getReturnById = async (req, res) => {
+exports.getProductById = async (req, res) => {
   try {
-    const returnRecord = await Return.findById(req.params.id);
+    const { productId } = req.params;
     
-    if (!returnRecord) {
-      return res.status(404).json({ error: 'Return not found' });
+    const client = getClient();
+    const { body } = await client.get({
+      path: `products/${productId}`,
+    });
+    
+    if (!body?.product) {
+      return res.status(404).json({ error: 'Product not found' });
     }
     
-    return res.status(200).json(returnRecord);
+    return res.json(body.product);
   } catch (error) {
-    console.error('Error fetching return:', error);
-    return res.status(500).json({ 
-      error: 'Failed to fetch return',
-      details: error.message 
-    });
+    console.error('Error fetching product from Shopify:', error);
+    res.status(500).json({ error: 'Failed to fetch product from Shopify' });
   }
 };
-
-exports.getReturnsByOrder = async (req, res) => {
-  try {
-    const returns = await Return.find({ orderId: req.params.orderId });
-    return res.status(200).json(returns);
-  } catch (error) {
-    console.error('Error fetching returns by order:', error);
-    return res.status(500).json({ 
-      error: 'Failed to fetch returns',
-      details: error.message 
-    });
-  }
-};
-
-// server/routes/products.js
-const express = require('express');
-const router = express.Router();
-const productsController = require('../controllers/products');
-
-router.get('/alternatives', productsController.getAlternatives);
-router.get('/:productId', productsController.getProductById);
-
-module.exports = router;

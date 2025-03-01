@@ -1,6 +1,5 @@
+// server/controllers/orders.js
 const { getClient } = require('../services/shopify');
-
-const RETURN_WINDOW_DAYS = 100;
 
 exports.lookupOrder = async (req, res) => {
   const { orderId, email } = req.body;
@@ -19,25 +18,14 @@ exports.lookupOrder = async (req, res) => {
       return res.status(404).json({ error: 'Order not found or email mismatch' });
     }
 
-    // Process the order data (similar to your existing implementation)
+    // Process the order data
     const refunds = body.order.refunds.flatMap((refund) =>
       refund.refund_line_items.map((item) => item.line_item_id)
     );
 
-    // Calculate the cutoff date for returns
-    const cutoffDate = new Date();
-    cutoffDate.setDate(cutoffDate.getDate() - RETURN_WINDOW_DAYS);
-
     // Filter eligible items
     const eligibleItems = body.order.line_items.filter((item) => {
-      // Your existing eligibility logic
-      const isEligible = item.fulfillment_status === 'fulfilled' && 
-                        !refunds.includes(item.id);
-      
-      if (!isEligible) return false;
-
-      // Additional logic...
-      return true;
+      return item.fulfillment_status === 'fulfilled' && !refunds.includes(item.id);
     });
 
     return res.status(200).json({
@@ -46,6 +34,9 @@ exports.lookupOrder = async (req, res) => {
     });
   } catch (err) {
     console.error('Error fetching Shopify order:', err);
-    return res.status(404).json({ error: 'Order not found' });
+    return res.status(500).json({ 
+      error: 'Error fetching order from Shopify',
+      details: err.message
+    });
   }
 };
