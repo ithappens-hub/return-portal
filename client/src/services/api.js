@@ -1,5 +1,4 @@
 // client/src/services/api.js
-// Replace your current api.js with this implementation
 const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000/api';
 
 export const lookupOrder = async (orderId, email) => {
@@ -37,22 +36,6 @@ export const submitReturn = async (returnData) => {
     if (!response.ok) {
       const errorData = await response.json();
       throw new Error(errorData.error || 'Failed to submit return');
-    }
-
-    return await response.json();
-  } catch (error) {
-    console.error('API error:', error);
-    throw error;
-  }
-};
-
-export const getProductAlternatives = async (productId) => {
-  try {
-    const response = await fetch(`${API_BASE_URL}/products/alternatives?for=${productId}`);
-    
-    if (!response.ok) {
-      const errorData = await response.json();
-      throw new Error(errorData.error || 'Failed to get product alternatives');
     }
 
     return await response.json();
